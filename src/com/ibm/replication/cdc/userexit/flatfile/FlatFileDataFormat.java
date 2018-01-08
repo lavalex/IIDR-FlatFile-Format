@@ -38,11 +38,11 @@
 
 package com.ibm.replication.cdc.userexit.flatfile;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
+import java.net.URL;
 import java.nio.ByteBuffer;
 import java.sql.Time;
 import java.sql.Timestamp;
@@ -57,6 +57,7 @@ import com.datamirror.ts.target.publication.userexit.DataRecordIF;
 import com.datamirror.ts.target.publication.userexit.DataTypeConversionException;
 import com.datamirror.ts.target.publication.userexit.ReplicationEventIF;
 import com.datamirror.ts.target.publication.userexit.datastage.DataStageDataFormatIF;
+import com.datamirror.ts.util.trace.Trace;
 
 /**
  * 
@@ -191,19 +192,41 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 
 	private String datetimeFormat = DEFAULT_DATETIME_FORMAT;
 	private String newLine = DEFAULT_NEW_LINE;
+	String delimiter = DEFAULT_DELIMITER;
+	String quote = DEFAULT_QUOTE;
 
 	public FlatFileDataFormat() {
 
+		loadConfigurationProperties();
+
+		COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8(delimiter);
+		QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(quote);
+		COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(delimiter + quote);
+		QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(quote + delimiter + quote);
+		QUOTE_COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8(quote + delimiter);
+
+	}
+
+	/*
+	 * Load the configuration from the properties file found in the classpath
+	 */
+	private void loadConfigurationProperties() {
+
 		Properties prop = new Properties();
-		InputStream input = null;
-		String delimiter = DEFAULT_DELIMITER;
-		String quote = DEFAULT_QUOTE;
+		InputStream configFileStream = null;
+
+		// Load the configuration properties from the
+		// FlatFileDataFormat.properties file
+		String propertiesFile = this.getClass().getSimpleName() + ".properties";
 
 		try {
 
-			input = new FileInputStream("fileformat.properties");
-
-			prop.load(input);
+			URL fileURL = this.getClass().getClassLoader().getResource(propertiesFile);
+			Trace.traceAlways(
+					"Loading properties for data formatter " + this.getClass().getName() + " from file " + fileURL);
+			configFileStream = this.getClass().getClassLoader().getResourceAsStream(propertiesFile);
+			prop.load(configFileStream);
+			configFileStream.close();
 
 			datetimeFormat = prop.getProperty("datetimeFormat", DEFAULT_DATETIME_FORMAT);
 			delimiter = prop.getProperty("delimiter", DEFAULT_DELIMITER);
@@ -213,21 +236,14 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 		} catch (IOException ex) {
 			ex.printStackTrace();
 		} finally {
-			if (input != null) {
+			if (configFileStream != null) {
 				try {
-					input.close();
+					configFileStream.close();
 				} catch (IOException e) {
 					e.printStackTrace();
 				}
 			}
 		}
-
-		COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8(delimiter);
-		QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(quote);
-		COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(delimiter + quote);
-		QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(quote + delimiter + quote);
-		QUOTE_COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8(quote + delimiter);
-
 	}
 
 	/**
