@@ -197,6 +197,7 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 	private String newLine = DEFAULT_NEW_LINE;
 	private String columnSeparator = DEFAULT_COLUMN_SEPARATOR;
 	private String columnDelimiter = DEFAULT_COLUMN_DELIMITER;
+	private boolean stripControlCharacters = true;
 
 	public FlatFileDataFormat() {
 
@@ -238,6 +239,7 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 			columnSeparator = getProperty(prop, "columnSeparator", DEFAULT_COLUMN_SEPARATOR);
 			columnDelimiter = getProperty(prop, "columnDelimiter", DEFAULT_COLUMN_DELIMITER);
 			newLine = getProperty(prop, "newLine", DEFAULT_NEW_LINE);
+			stripControlCharacters = getPropertyBoolean(prop, "stripControlCharacters", true);
 
 			// Set the default format for timestamps
 			outTimestampFormat = new SimpleDateFormat(timestampColumnFormat);
@@ -354,12 +356,17 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 							val = val.substring(0, clobTruncationPoint);
 						}
 
-						if (newLine.equals(DEFAULT_NEW_LINE)) {
-							outBuffer = addUtf8StringToByteBuffer(outBuffer, val);
-						} else {
-							outBuffer = addUtf8StringToByteBuffer(outBuffer,
-									val.replace("\r", "").replace("\n", newLine));
+						// Strip control characters from the string
+						if (stripControlCharacters) {
+							if (!columnSeparator.isEmpty())
+								val = val.replace(columnSeparator, "");
+							if (!columnDelimiter.isEmpty())
+								val = val.replace(columnDelimiter, "");
+							if (!newLine.isEmpty())
+								val = val.replace(newLine, "");
 						}
+
+						outBuffer = addUtf8StringToByteBuffer(outBuffer, val);
 
 					} else if (colObj instanceof BigDecimal) {
 						outBuffer = addUtf8StringToByteBuffer(outBuffer, ((BigDecimal) colObj).toString());
