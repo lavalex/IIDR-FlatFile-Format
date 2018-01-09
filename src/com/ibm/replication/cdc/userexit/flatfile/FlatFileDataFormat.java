@@ -158,7 +158,7 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 	public static final int BYTE_BUFFER_SPACE_FOR_FIELD_SEPARATORS = 100;
 	private static final int NUM_TRAILING_COLUMNS = JournalControlFieldRegistry.getNumberOfJournalControlFields();
 
-	private SimpleDateFormat outDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+	private SimpleDateFormat outTimestampFormat;
 	private SimpleDateFormat outDateOnlyFormat = new SimpleDateFormat("yyyy-MM-dd");
 	private SimpleDateFormat outTimeOnlyFormat = new SimpleDateFormat("HH:mm:ss");
 
@@ -177,34 +177,36 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 
 	ByteBuffer outBuffer = ByteBuffer.allocate(BYTE_BUFFER_AUTO_INCREMENT_SIZE);
 
-	private byte[] COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8(",");
-	private byte[] QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8("\"");
-	private byte[] COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(",\"");
-	private byte[] QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8("\",\"");
-	private byte[] QUOTE_COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8("\",");
+	private byte[] COMMA_AS_BYTE_ARRAY;
+	private byte[] QUOTE_AS_BYTE_ARRAY;
+	private byte[] COMMA_QUOTE_AS_BYTE_ARRAY;
+	private byte[] QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY;
+	private byte[] QUOTE_COMMA_AS_BYTE_ARRAY;
 	private byte[] ZERO_AS_BYTE_ARRAY = getAsByteArrayInUtf8("0");
 	private byte[] ONE_AS_BYTE_ARRAY = getAsByteArrayInUtf8("1");
 
 	private String DEFAULT_DATETIME_FORMAT = "yyyy-MM-dd hh:mm:ss";
-	private String DEFAULT_DELIMITER = ",";
-	private String DEFAULT_QUOTE = "\"";
+	private String DEFAULT_COLUMN_SEPARATOR = ",";
+	private String DEFAULT_COLUMN_DELIMITER = "\"";
 	private String DEFAULT_NEW_LINE = "\n";
 
-	private String datetimeFormat = DEFAULT_DATETIME_FORMAT;
+	private boolean overrideJournalControlTimestampFormat = false;
+	private String journalControlTimestampFormat = DEFAULT_DATETIME_FORMAT;
+	private boolean overrideTimestampColumnFormat = false;
+	private String timestampColumnFormat = DEFAULT_DATETIME_FORMAT;
 	private String newLine = DEFAULT_NEW_LINE;
-	String delimiter = DEFAULT_DELIMITER;
-	String quote = DEFAULT_QUOTE;
+	private String columnSeparator = DEFAULT_COLUMN_SEPARATOR;
+	private String columnDelimiter = DEFAULT_COLUMN_DELIMITER;
 
 	public FlatFileDataFormat() {
 
 		loadConfigurationProperties();
 
-		COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8(delimiter);
-		QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(quote);
-		COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(delimiter + quote);
-		QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(quote + delimiter + quote);
-		QUOTE_COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8(quote + delimiter);
-
+		COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8(columnSeparator);
+		QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(columnDelimiter);
+		COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(columnSeparator + columnDelimiter);
+		QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(columnDelimiter + columnSeparator + columnDelimiter);
+		QUOTE_COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8(columnDelimiter + columnSeparator);
 	}
 
 	/*
@@ -228,10 +230,17 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 			prop.load(configFileStream);
 			configFileStream.close();
 
-			datetimeFormat = prop.getProperty("datetimeFormat", DEFAULT_DATETIME_FORMAT);
-			delimiter = prop.getProperty("delimiter", DEFAULT_DELIMITER);
-			quote = prop.getProperty("quote", DEFAULT_QUOTE);
-			newLine = prop.getProperty("newLine", DEFAULT_NEW_LINE);
+			overrideJournalControlTimestampFormat = getPropertyBoolean(prop, "overrideJournalControlTimestampFormat",
+					false);
+			journalControlTimestampFormat = getProperty(prop, "journalControlTimestampFormat", DEFAULT_DATETIME_FORMAT);
+			overrideTimestampColumnFormat = getPropertyBoolean(prop, "overrideTimestampColumnFormat", false);
+			timestampColumnFormat = getProperty(prop, "timestampColumnFormat", DEFAULT_DATETIME_FORMAT);
+			columnSeparator = getProperty(prop, "columnSeparator", DEFAULT_COLUMN_SEPARATOR);
+			columnDelimiter = getProperty(prop, "columnDelimiter", DEFAULT_COLUMN_DELIMITER);
+			newLine = getProperty(prop, "newLine", DEFAULT_NEW_LINE);
+
+			// Set the default format for timestamps
+			outTimestampFormat = new SimpleDateFormat(timestampColumnFormat);
 
 		} catch (IOException ex) {
 			ex.printStackTrace();
@@ -244,6 +253,33 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 				}
 			}
 		}
+	}
+
+	/*
+	 * Get property string value
+	 */
+	private String getProperty(Properties properties, String property, String defaultValue) {
+		String value = defaultValue;
+		try {
+			value = properties.getProperty(property);
+		} catch (Exception e) {
+			Trace.traceAlways("Error obtaining property " + property + ", using default value " + value);
+		}
+		return value;
+	}
+
+	/*
+	 * Get property boolean value
+	 */
+	private boolean getPropertyBoolean(Properties properties, String property, boolean defaultValue) {
+		boolean value = defaultValue;
+		try {
+			value = Boolean.parseBoolean(properties.getProperty(property));
+		} catch (Exception e) {
+			Trace.traceAlways(
+					"Error obtaining or converting property " + property + " to boolean, using default value " + value);
+		}
+		return value;
 	}
 
 	/**
@@ -263,7 +299,6 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 					// add of stuff between columns
 					if (needToCloseQuote) {
 						outBuffer.put(QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY);
-
 					} else {
 						outBuffer.put(COMMA_QUOTE_AS_BYTE_ARRAY);
 					}
@@ -272,7 +307,11 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 					if (colObj instanceof Time) {
 						outBuffer = addUtf8StringToByteBuffer(outBuffer, outTimeOnlyFormat.format((Time) colObj));
 					} else if (colObj instanceof Timestamp) {
-						outBuffer = addUtf8StringToByteBuffer(outBuffer, outDateFormat.format((Timestamp) colObj));
+						if (!overrideTimestampColumnFormat)
+							outBuffer = addUtf8StringToByteBuffer(outBuffer, ((Timestamp) colObj).toString());
+						else
+							outBuffer = addUtf8StringToByteBuffer(outBuffer,
+									outTimestampFormat.format((Timestamp) colObj));
 					} else if (colObj instanceof Date) // This must be checked
 														// after Time,
 														// Timestamp, as such
@@ -323,12 +362,7 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 						}
 
 					} else if (colObj instanceof BigDecimal) {
-						outBuffer = addUtf8StringToByteBuffer(outBuffer, ((BigDecimal) colObj).toString()); // Use
-																											// toPlainString
-																											// for
-																											// Java
-																											// 1.5
-
+						outBuffer = addUtf8StringToByteBuffer(outBuffer, ((BigDecimal) colObj).toString());
 					} else {
 						outBuffer = addUtf8StringToByteBuffer(outBuffer, colObj.toString());
 					}
@@ -404,10 +438,14 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 		}
 
 		UserExitJournalHeader header = (UserExitJournalHeader) event.getJournalHeader();
-		// String timestampString = header.getDSOutputTimestampStr();
 		String commitIDString = header.getCommitID();
 
-		String timestampString = new SimpleDateFormat(datetimeFormat).format(header.getDSOutputTimestamp());
+		// Retrieve and format the journal control timestamp
+		String timestampString = "";
+		if (overrideJournalControlTimestampFormat)
+			timestampString = header.getDSOutputTimestamp().toString();
+		else
+			timestampString = new SimpleDateFormat(journalControlTimestampFormat).format(header.getDSOutputTimestamp());
 
 		String outString = new String(QUOTE_AS_BYTE_ARRAY) + timestampString
 				+ new String(QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY) + commitIDString
