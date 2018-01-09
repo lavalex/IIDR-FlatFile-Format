@@ -35,7 +35,13 @@ Finally, configure the subscription-level user exit. The full name of the user e
 ![Subscription User Exit](Documentation/images/FlatFileFormat_UserExit.png)
 
 ## Replicating changes
-Below you will find an example of three change records.
+Below you will find an example of three change records: first and insert, then and update and finally a delete of the same record.
+
+```
+"2018-01-09 08:36:23.969","730860","I","DB2INST1",,,,,,,,,,,,,"876255","35","SOMMERVILLE NATIONAL LEASING"," ","255 DALESFORD RD."," ","LANSING","MI","A","49979","45000","251"
+"2018-01-09 08:38:36.000","730861","U","DB2INST1","876255","35","SOMMERVILLE NATIONAL LEASING"," ","255 DALESFORD RD."," ","LANSING","MI","A","49979","45000","251","876255","35","SOMMERVILLE NATIONAL LEASING"," ","255 DALESFORD RD."," ","LANSING","MI","A","49980","45000","251"
+"2018-01-09 08:38:50.000","730862","D","DB2INST1","876255","35","SOMMERVILLE NATIONAL LEASING"," ","255 DALESFORD RD."," ","LANSING","MI","A","49980","45000","251",,,,,,,,,,,,
+```
 
 ## Compilation
 If you wish to compile the user exit yourself, the easiest method is to use Ant ([https://ant.apache.org/bindownload.cgi](https://ant.apache.org/bindownload.cgi)). 
