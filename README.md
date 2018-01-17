@@ -1,4 +1,4 @@
-# IBM InfoSphere Data Replication User Exit - Flat File custom Formatter
+# IBM InfoSphere Data Replication User Exit - Flat File custom Formatter 
 
 ## Installation
 The GitHub repository contains the source but also the data formatter user exit in its compiled form, enclosed in a jar file. If you wish, you can choose to build the jar file yourself using Ant, or to manually compile the user exit. If you wish to do so, please refer to the [Compilation](#compilation) section.
