@@ -56,6 +56,7 @@ import com.datamirror.ts.target.publication.UserExitJournalHeader;
 import com.datamirror.ts.target.publication.userexit.DataRecordIF;
 import com.datamirror.ts.target.publication.userexit.DataTypeConversionException;
 import com.datamirror.ts.target.publication.userexit.ReplicationEventIF;
+import com.datamirror.ts.target.publication.userexit.UserExitException;
 import com.datamirror.ts.target.publication.userexit.datastage.DataStageDataFormatIF;
 import com.datamirror.ts.util.trace.Trace;
 
@@ -66,6 +67,62 @@ import com.datamirror.ts.util.trace.Trace;
  *
  */
 public class FlatFileDataFormat implements DataStageDataFormatIF {
+
+	public final char SUB_RLA_STANDARD = 'Y';
+	public final char SUB_RLA_AUDIT = 'A';
+	public final char SUB_RLA_AUDIT_B4 = 'B';
+	public final char SUB_RLA_INS_UPD = 'I';
+	public final char SUB_RLA_DEL_NONE = 'D';
+	public final char SUB_RLA_NONE = 'N';
+	public final char SUB_RLA_NON_UPD = 'U';
+
+	public static final int BYTE_BUFFER_AUTO_INCREMENT_SIZE = 10000;
+	public static final int BYTE_BUFFER_AUTO_INCREMENT_BREATHING_SPACE = 1000;
+	public static final int BYTE_BUFFER_SPACE_FOR_FIELD_SEPARATORS = 100;
+	private static final int NUM_TRAILING_COLUMNS = JournalControlFieldRegistry.getNumberOfJournalControlFields();
+
+	private SimpleDateFormat outTimestampFormat;
+	private SimpleDateFormat outDateOnlyFormat = new SimpleDateFormat("yyyy-MM-dd");
+	private SimpleDateFormat outTimeOnlyFormat = new SimpleDateFormat("HH:mm:ss");
+
+	private int clobTruncationPoint;
+	private int blobTruncationPoint;
+
+	private String FIXED_QUOTE;
+	private String FIXED_QUOTE_COLON_QUOTE;
+	private String FIXED_COMMA;
+	private String FIXED_LEFT_CURLY;
+	private String FIXED_RIGHT_CURLY;
+	private byte[] COMMA_AS_BYTE_ARRAY;
+	private byte[] QUOTE_AS_BYTE_ARRAY;
+	private byte[] COMMA_QUOTE_AS_BYTE_ARRAY;
+	private byte[] QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY;
+	private byte[] QUOTE_COMMA_AS_BYTE_ARRAY;
+	private byte[] ZERO_AS_BYTE_ARRAY = getAsByteArrayInUtf8("0");
+	private byte[] ONE_AS_BYTE_ARRAY = getAsByteArrayInUtf8("1");
+
+	private String DEFAULT_DATETIME_FORMAT = "yyyy-MM-dd hh:mm:ss";
+	private String DEFAULT_COLUMN_SEPARATOR = ",";
+	private String DEFAULT_COLUMN_DELIMITER = "\"";
+	private String DEFAULT_NEW_LINE = "\n";
+
+	private String lineOutputFormat = "CSV";
+	private boolean csvOutput = true;
+	private boolean overrideJournalControlTimestampFormat = false;
+	private String journalControlTimestampFormat = DEFAULT_DATETIME_FORMAT;
+	private boolean overrideTimestampColumnFormat = false;
+	private String timestampColumnFormat = DEFAULT_DATETIME_FORMAT;
+	private String newLine = DEFAULT_NEW_LINE;
+	private String columnSeparator = DEFAULT_COLUMN_SEPARATOR;
+	private String columnDelimiter = DEFAULT_COLUMN_DELIMITER;
+	private boolean stripControlCharacters = true;
+
+	private boolean afterImage = false;
+
+	ByteBuffer outBuffer = ByteBuffer.allocate(BYTE_BUFFER_AUTO_INCREMENT_SIZE);
+	ByteBuffer csvNullImage = null;
+	private int currentOpType;
+
 	public static byte[] getAsByteArrayInUtf8(String inString) {
 		byte[] retval;
 
@@ -145,64 +202,15 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 		return retVal;
 	}
 
-	public final char SUB_RLA_STANDARD = 'Y';
-	public final char SUB_RLA_AUDIT = 'A';
-	public final char SUB_RLA_AUDIT_B4 = 'B';
-	public final char SUB_RLA_INS_UPD = 'I';
-	public final char SUB_RLA_DEL_NONE = 'D';
-	public final char SUB_RLA_NONE = 'N';
-	public final char SUB_RLA_NON_UPD = 'U';
-
-	public static final int BYTE_BUFFER_AUTO_INCREMENT_SIZE = 10000;
-	public static final int BYTE_BUFFER_AUTO_INCREMENT_BREATHING_SPACE = 1000;
-	public static final int BYTE_BUFFER_SPACE_FOR_FIELD_SEPARATORS = 100;
-	private static final int NUM_TRAILING_COLUMNS = JournalControlFieldRegistry.getNumberOfJournalControlFields();
-
-	private SimpleDateFormat outTimestampFormat;
-	private SimpleDateFormat outDateOnlyFormat = new SimpleDateFormat("yyyy-MM-dd");
-	private SimpleDateFormat outTimeOnlyFormat = new SimpleDateFormat("HH:mm:ss");
-
-	private int destinationType; // Is this flat file or direct connect?
-
-	private int clobTruncationPoint;
-	private int blobTruncationPoint;
-
-	/**
-	 * Remember the truncation points.
-	 */
-	public void setLobTruncationPoint(int maxClobLengthInChars, int maxBlobLengthInBytes) {
-		clobTruncationPoint = maxClobLengthInChars;
-		blobTruncationPoint = maxBlobLengthInBytes;
-	}
-
-	ByteBuffer outBuffer = ByteBuffer.allocate(BYTE_BUFFER_AUTO_INCREMENT_SIZE);
-
-	private byte[] COMMA_AS_BYTE_ARRAY;
-	private byte[] QUOTE_AS_BYTE_ARRAY;
-	private byte[] COMMA_QUOTE_AS_BYTE_ARRAY;
-	private byte[] QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY;
-	private byte[] QUOTE_COMMA_AS_BYTE_ARRAY;
-	private byte[] ZERO_AS_BYTE_ARRAY = getAsByteArrayInUtf8("0");
-	private byte[] ONE_AS_BYTE_ARRAY = getAsByteArrayInUtf8("1");
-
-	private String DEFAULT_DATETIME_FORMAT = "yyyy-MM-dd hh:mm:ss";
-	private String DEFAULT_COLUMN_SEPARATOR = ",";
-	private String DEFAULT_COLUMN_DELIMITER = "\"";
-	private String DEFAULT_NEW_LINE = "\n";
-
-	private boolean overrideJournalControlTimestampFormat = false;
-	private String journalControlTimestampFormat = DEFAULT_DATETIME_FORMAT;
-	private boolean overrideTimestampColumnFormat = false;
-	private String timestampColumnFormat = DEFAULT_DATETIME_FORMAT;
-	private String newLine = DEFAULT_NEW_LINE;
-	private String columnSeparator = DEFAULT_COLUMN_SEPARATOR;
-	private String columnDelimiter = DEFAULT_COLUMN_DELIMITER;
-	private boolean stripControlCharacters = true;
-
-	public FlatFileDataFormat() {
+	public FlatFileDataFormat() throws UserExitException {
 
 		loadConfigurationProperties();
 
+		FIXED_QUOTE = "\"";
+		FIXED_QUOTE_COLON_QUOTE = FIXED_QUOTE + ":" + FIXED_QUOTE;
+		FIXED_COMMA = ",";
+		FIXED_LEFT_CURLY = "{";
+		FIXED_RIGHT_CURLY = "}";
 		COMMA_AS_BYTE_ARRAY = getAsByteArrayInUtf8(columnSeparator);
 		QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(columnDelimiter);
 		COMMA_QUOTE_AS_BYTE_ARRAY = getAsByteArrayInUtf8(columnSeparator + columnDelimiter);
@@ -213,7 +221,7 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 	/*
 	 * Load the configuration from the properties file found in the classpath
 	 */
-	private void loadConfigurationProperties() {
+	private void loadConfigurationProperties() throws UserExitException {
 
 		Properties prop = new Properties();
 		InputStream configFileStream = null;
@@ -230,6 +238,14 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 			configFileStream = this.getClass().getClassLoader().getResourceAsStream(propertiesFile);
 			prop.load(configFileStream);
 			configFileStream.close();
+
+			lineOutputFormat = getProperty(prop, "lineOutputFormat", "CSV");
+			if (lineOutputFormat.equalsIgnoreCase("CSV"))
+				csvOutput = true;
+			else if (lineOutputFormat.equals("JSON"))
+				csvOutput = false;
+			else
+				throw new UserExitException("Invalid value " + lineOutputFormat + " for property lineOutputFormat");
 
 			overrideJournalControlTimestampFormat = getPropertyBoolean(prop, "overrideJournalControlTimestampFormat",
 					false);
@@ -263,7 +279,7 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 	private String getProperty(Properties properties, String property, String defaultValue) {
 		String value = defaultValue;
 		try {
-			value = properties.getProperty(property);
+			value = properties.getProperty(property, defaultValue);
 		} catch (Exception e) {
 			Trace.traceAlways("Error obtaining property " + property + ", using default value " + value);
 		}
@@ -276,12 +292,20 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 	private boolean getPropertyBoolean(Properties properties, String property, boolean defaultValue) {
 		boolean value = defaultValue;
 		try {
-			value = Boolean.parseBoolean(properties.getProperty(property));
+			value = Boolean.parseBoolean(properties.getProperty(property, Boolean.toString(defaultValue)));
 		} catch (Exception e) {
 			Trace.traceAlways(
 					"Error obtaining or converting property " + property + " to boolean, using default value " + value);
 		}
 		return value;
+	}
+
+	/**
+	 * Remember the truncation points.
+	 */
+	public void setLobTruncationPoint(int maxClobLengthInChars, int maxBlobLengthInBytes) {
+		clobTruncationPoint = maxClobLengthInChars;
+		blobTruncationPoint = maxBlobLengthInBytes;
 	}
 
 	/**
@@ -293,34 +317,44 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 
 		if (image != null) {
 			for (int i = 1; i <= image.getColumnCount() - NUM_TRAILING_COLUMNS; i++) {
+				// Determine column name (prefix with B_ if before image of
+				// update)
+				String columnName = image.getColumnName(i);
+				if (!afterImage && currentOpType == DataStageDataFormatIF.FULL_UPDATE_RECORD)
+					columnName = "B_" + columnName;
 				Object colObj = image.getObject(i);
 
 				// For NULL values, we just leave the field empty
 				if (colObj != null) {
-					// For performance, we have this wacky logic to only do one
-					// add of stuff between columns
-					if (needToCloseQuote) {
-						outBuffer.put(QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY);
+					if (csvOutput) {
+						// For performance, we have this wacky logic to only do
+						// one add of stuff between columns
+						if (needToCloseQuote) {
+							outBuffer.put(QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY);
+						} else {
+							outBuffer.put(COMMA_QUOTE_AS_BYTE_ARRAY);
+						}
+						needToCloseQuote = true;
 					} else {
-						outBuffer.put(COMMA_QUOTE_AS_BYTE_ARRAY);
+						outBuffer = addUtf8StringToByteBuffer(outBuffer, FIXED_COMMA);
 					}
-					needToCloseQuote = true;
 
 					if (colObj instanceof Time) {
-						outBuffer = addUtf8StringToByteBuffer(outBuffer, outTimeOnlyFormat.format((Time) colObj));
+						addStringElement(outBuffer, columnName, outTimeOnlyFormat.format((Time) colObj));
 					} else if (colObj instanceof Timestamp) {
+						String outString = null;
 						if (!overrideTimestampColumnFormat)
-							outBuffer = addUtf8StringToByteBuffer(outBuffer, ((Timestamp) colObj).toString());
+							outString = ((Timestamp) colObj).toString();
 						else
-							outBuffer = addUtf8StringToByteBuffer(outBuffer,
-									outTimestampFormat.format((Timestamp) colObj));
+							outString = outTimestampFormat.format((Timestamp) colObj);
+						addStringElement(outBuffer, columnName, outString);
 					} else if (colObj instanceof Date) // This must be checked
 														// after Time,
 														// Timestamp, as such
 														// objects are also Date
 														// objects
 					{
-						outBuffer = addUtf8StringToByteBuffer(outBuffer, outDateOnlyFormat.format((Date) colObj));
+						addStringElement(outBuffer, columnName, outDateOnlyFormat.format((Date) colObj));
 					} else if (colObj instanceof byte[]) {
 						byte[] val = (byte[]) colObj;
 						if (val.length > blobTruncationPoint) {
@@ -329,27 +363,19 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 							truncBuffer.put(val, 0, blobTruncationPoint);
 							val = truncVal;
 						}
-						// If this is a Direct Connect, then double up the
-						// quotes
-						if (destinationType == DataStageDataFormatIF.DIRECT_CONNECT) {
-							for (int j = 0; j < val.length; j++) {
-								if (val[j] == QUOTE_AS_BYTE_ARRAY[0]) {
-									// double up the quote
-									outBuffer = addByteToByteBuffer(outBuffer, QUOTE_AS_BYTE_ARRAY[0]);
-								}
-								outBuffer = addByteToByteBuffer(outBuffer, val[j]);
-
-							}
-
-						} else {
-							outBuffer = addBytesToByteBuffer(outBuffer, val);
-						}
+						if (!csvOutput)
+							outBuffer = addUtf8StringToByteBuffer(outBuffer,
+									FIXED_QUOTE + columnName + FIXED_QUOTE_COLON_QUOTE);
+						outBuffer = addBytesToByteBuffer(outBuffer, val);
+						if (!csvOutput)
+							outBuffer = addUtf8StringToByteBuffer(outBuffer, FIXED_QUOTE);
 					} else if (colObj instanceof Boolean) {
-						if (((Boolean) colObj).booleanValue()) {
-							outBuffer = addBytesToByteBuffer(outBuffer, ONE_AS_BYTE_ARRAY);
-						} else {
-							outBuffer = addBytesToByteBuffer(outBuffer, ZERO_AS_BYTE_ARRAY);
-						}
+						String outString = null;
+						if (((Boolean) colObj).booleanValue())
+							outString = new String(ONE_AS_BYTE_ARRAY);
+						else
+							outString = new String(ZERO_AS_BYTE_ARRAY);
+						addStringElement(outBuffer, columnName, outString);
 					} else if (colObj instanceof String) {
 						String val = ((String) colObj);
 						if (val.length() > clobTruncationPoint) {
@@ -365,55 +391,78 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 							if (!newLine.isEmpty())
 								val = val.replace(newLine, "");
 						}
-
-						outBuffer = addUtf8StringToByteBuffer(outBuffer, val);
-
+						addStringElement(outBuffer, columnName, val);
 					} else if (colObj instanceof BigDecimal) {
-						outBuffer = addUtf8StringToByteBuffer(outBuffer, ((BigDecimal) colObj).toString());
+						addStringElement(outBuffer, columnName, ((BigDecimal) colObj).toString());
 					} else {
-						outBuffer = addUtf8StringToByteBuffer(outBuffer, colObj.toString());
+						addStringElement(outBuffer, columnName, colObj.toString());
 					}
-
 				} else {
-					if (needToCloseQuote) {
-						outBuffer.put(QUOTE_COMMA_AS_BYTE_ARRAY);
-						needToCloseQuote = false;
-
-					} else {
-						outBuffer.put(COMMA_AS_BYTE_ARRAY);
+					if (csvOutput) {
+						if (needToCloseQuote) {
+							outBuffer.put(QUOTE_COMMA_AS_BYTE_ARRAY);
+							needToCloseQuote = false;
+						} else {
+							outBuffer.put(COMMA_AS_BYTE_ARRAY);
+						}
 					}
-
 				}
-
 			}
-			if (needToCloseQuote) {
+			// Write closing quote or right curly bracket
+			if (csvOutput && needToCloseQuote)
 				outBuffer.put(QUOTE_AS_BYTE_ARRAY);
-			}
+			if (!csvOutput && afterImage)
+				outBuffer = addUtf8StringToByteBuffer(outBuffer, FIXED_RIGHT_CURLY);
 
 		}
+
+		// If the before image was processed, make sure the next data image is
+		// treated as the after image
+		if (!afterImage)
+			afterImage = true;
 
 		return outBuffer;
 	}
 
-	ByteBuffer nullImage = null;
+	/**
+	 * Add element to the output buffer, depending if it's CSV of JSON
+	 */
+	private void addStringElement(ByteBuffer outBuffer, String columnName, String data)
+			throws DataTypeConversionException {
+		if (csvOutput)
+			outBuffer = addUtf8StringToByteBuffer(outBuffer, data);
+		else
+			outBuffer = addUtf8StringToByteBuffer(outBuffer, getJsonElement(columnName, data));
+	}
 
 	/**
 	 * Return a ByteBuffer containing the appropriate null values for the row.
 	 */
 	public ByteBuffer formatNullImage(DataRecordIF image) throws DataTypeConversionException {
-		// There is a separate data formatter for each table, so a null image is
-		// the same for each row, so just need to create it once
-		if (nullImage == null) {
-			String outString = "";
-			if (image != null) {
-				for (int i = 1; i <= image.getColumnCount() - NUM_TRAILING_COLUMNS; i++) {
-					outString = outString + new String(COMMA_AS_BYTE_ARRAY);
+		ByteBuffer returnByteBuffer = null;
+		if (csvOutput) {
+			// There is a separate data formatter for each table, so a null
+			// image is the same for each row, so just need to create it once
+			if (csvNullImage == null) {
+				String outString = "";
+				if (image != null) {
+					for (int i = 1; i <= image.getColumnCount() - NUM_TRAILING_COLUMNS; i++) {
+						outString = outString + new String(COMMA_AS_BYTE_ARRAY);
+					}
 				}
+				csvNullImage = ByteBuffer.wrap(getAsByteArrayInUtf8(outString));
+				csvNullImage.position(csvNullImage.capacity());
 			}
-			nullImage = ByteBuffer.wrap(getAsByteArrayInUtf8(outString));
-			nullImage.position(nullImage.capacity());
+			returnByteBuffer = csvNullImage;
+		} else {
+			String outString = "";
+			if (afterImage)
+				outString = outString + FIXED_RIGHT_CURLY;
+			returnByteBuffer = ByteBuffer.wrap(getAsByteArrayInUtf8(outString));
+			returnByteBuffer.position(returnByteBuffer.capacity());
+			afterImage = true; // Next image is the after image
 		}
-		return nullImage;
+		return returnByteBuffer;
 	}
 
 	/**
@@ -423,8 +472,13 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 	 */
 	public ByteBuffer formatJournalControlFields(ReplicationEventIF event, int opType)
 			throws DataTypeConversionException {
+		// Make sure that the JSON record is only closed after the full image
+		// has been processed
+		afterImage = false;
+
 		// Determine the character to use to indicate the operation type
 		char opChar = ' ';
+		currentOpType = opType;
 		switch (opType) {
 		case DataStageDataFormatIF.INSERT_RECORD:
 			opChar = SUB_RLA_INS_UPD;
@@ -443,6 +497,7 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 			break;
 
 		}
+		String opString = "" + opChar;
 
 		UserExitJournalHeader header = (UserExitJournalHeader) event.getJournalHeader();
 		String commitIDString = header.getCommitID();
@@ -454,25 +509,34 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 		else
 			timestampString = new SimpleDateFormat(journalControlTimestampFormat).format(header.getDSOutputTimestamp());
 
-		String outString = new String(QUOTE_AS_BYTE_ARRAY) + timestampString
-				+ new String(QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY) + commitIDString
-				+ new String(QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY) + opChar + new String(QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY)
-				+ header.getUserName() + new String(QUOTE_AS_BYTE_ARRAY);
+		String outString = null;
+		if (csvOutput) {
+			outString = new String(QUOTE_AS_BYTE_ARRAY) + timestampString + new String(QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY)
+					+ commitIDString + new String(QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY) + opChar
+					+ new String(QUOTE_COMMA_QUOTE_AS_BYTE_ARRAY) + header.getUserName()
+					+ new String(QUOTE_AS_BYTE_ARRAY);
+		} else {
+			// Compose the JSON string with audit columns, ending with ,"
+			outString = new String(FIXED_LEFT_CURLY + getJsonElement("AUD_TIMESTAMP", timestampString) + FIXED_COMMA
+					+ getJsonElement("AUD_CCID", commitIDString) + FIXED_COMMA + getJsonElement("AUD_ENTTYP", opString)
+					+ FIXED_COMMA + getJsonElement("AUD_USER", header.getUserName()));
+		}
 
-		ByteBuffer retVal = ByteBuffer.allocate(1000);
+		ByteBuffer retVal = ByteBuffer.allocate(outString.length());
 		retVal = addUtf8StringToByteBuffer(retVal, outString);
 		return retVal;
 	}
 
+	private String getJsonElement(String elementName, String elementValue) {
+		return new String(FIXED_QUOTE + elementName + FIXED_QUOTE_COLON_QUOTE + elementValue + FIXED_QUOTE);
+	}
+
 	/**
 	 * Indicate whether this table is being delivered to DataStage using flat
-	 * files or by direct connect.
-	 * 
-	 * @param destination
-	 *            indicates the destination type
+	 * files or by direct connect. As CDC for DataStage only supports flat
+	 * files, the destination type is no longer relevant.
 	 */
 	public void setDestinationType(int destination) {
-		destinationType = destination;
 	}
 
 	public void formatChangedRowFields(UserExitJournalHeader journalHeader, DataRecordIF rowDataImage,

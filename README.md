@@ -7,8 +7,10 @@ Download and unzip the master zip file from GitHub through the following link: [
 
 ## Configuration
 In most scenarios you will need to perform a couple of configuration tasks:
-- Update the configuration properties in the FlatFileDataFormat.properties file
+- Update the configuration properties in the `FlatFileDataFormat.properties` file
 - Add the user exit and its configuration file to the classpath of the CDC engine
+
+In the `FlatFileDataFormat.properties` file you can set the output format of the change records, either CSV or JSON. When specifying `JSON` as the output format, the Record Format in table Flat File properties must be set to *Single Record*.
 
 ### Setting the configuration properties
 Update the `FlatFileDataFormat.properties` file with your favourite editor.
@@ -35,12 +37,19 @@ Finally, configure the subscription-level user exit. The full name of the user e
 ![Subscription User Exit](Documentation/images/FlatFileFormat_UserExit.png)
 
 ## Replicating changes
-Below you will find an example of three change records: first and insert, then and update and finally a delete of the same record.
+Below you will find an example of three CSV change records: first and insert, then and update and finally a delete of the same record.
 
 ```
 "2018-01-09 08:36:23.969","730860","I","DB2INST1",,,,,,,,,,,,,"876255","35","SOMMERVILLE NATIONAL LEASING"," ","255 DALESFORD RD."," ","LANSING","MI","A","49979","45000","251"
 "2018-01-09 08:38:36.000","730861","U","DB2INST1","876255","35","SOMMERVILLE NATIONAL LEASING"," ","255 DALESFORD RD."," ","LANSING","MI","A","49979","45000","251","876255","35","SOMMERVILLE NATIONAL LEASING"," ","255 DALESFORD RD."," ","LANSING","MI","A","49980","45000","251"
 "2018-01-09 08:38:50.000","730862","D","DB2INST1","876255","35","SOMMERVILLE NATIONAL LEASING"," ","255 DALESFORD RD."," ","LANSING","MI","A","49980","45000","251",,,,,,,,,,,,
+```
+
+If JSON has been chosen as the output format, the same changes would look as follows:
+```
+{"AUD_TIMESTAMP":"2018-01-09 08:36:23.969","AUD_CCID":"730860","AUD_ENTTYP":"I","AUD_USER":"DB2INST1","CUSTNO":"876255","BRANCH":"35","NAME1":"SOMMERVILLE NATIONAL LEASING","NAME2":" ","ADDRESS1":"255 DALESFORD RD.","ADDRESS2":" ","CITY":"LANSING","STATE":"MI","STATUS":"A","CRLIMIT":"49979","AMTYTD":"45000","REPNO":"251"}
+{"AUD_TIMESTAMP":"2018-01-09 08:38:36.000","AUD_CCID":"730861","AUD_ENTTYP":"U","AUD_USER":"DB2INST1","B_CUSTNO":"876255","B_BRANCH":"35","B_NAME1":"SOMMERVILLE NATIONAL LEASING","B_NAME2":" ","B_ADDRESS1":"255 DALESFORD RD.","B_ADDRESS2":" ","B_CITY":"LANSING","B_STATE":"MI","B_STATUS":"A","B_CRLIMIT":"49979","B_AMTYTD":"45000","B_REPNO":"251","CUSTNO":"876255","BRANCH":"35","NAME1":"SOMMERVILLE NATIONAL LEASING","NAME2":" ","ADDRESS1":"255 DALESFORD RD.","ADDRESS2":" ","CITY":"LANSING","STATE":"MI","STATUS":"A","CRLIMIT":"49980","AMTYTD":"45000","REPNO":"251"}
+{"AUD_TIMESTAMP":"2018-01-09 08:38:50.000","AUD_CCID":"730862","AUD_ENTTYP":"D","AUD_USER":"DB2INST1","CUSTNO":"876255","BRANCH":"35","NAME1":"SOMMERVILLE NATIONAL LEASING","NAME2":" ","ADDRESS1":"255 DALESFORD RD.","ADDRESS2":" ","CITY":"LANSING","STATE":"MI","STATUS":"A","CRLIMIT":"49980","AMTYTD":"45000","REPNO":"251"}
 ```
 
 ## Compilation
