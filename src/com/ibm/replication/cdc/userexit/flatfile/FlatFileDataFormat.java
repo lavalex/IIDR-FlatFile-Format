@@ -65,6 +65,7 @@ import com.datamirror.ts.util.trace.Trace;
  * Format the data suitable for the DataStage sequential file reader and column
  * importer stages.
  *
+ *
  */
 public class FlatFileDataFormat implements DataStageDataFormatIF {
 
