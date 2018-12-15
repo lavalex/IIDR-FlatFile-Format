@@ -106,6 +106,7 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 	private String DEFAULT_COLUMN_SEPARATOR = ",";
 	private String DEFAULT_COLUMN_DELIMITER = "\"";
 	private String DEFAULT_NEW_LINE = "\n";
+	private String DEFAULT_ESCAPE_CHARACTER = "\\";
 
 	private String lineOutputFormat = "CSV";
 	private boolean csvOutput = true;
@@ -117,6 +118,9 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 	private String columnSeparator = DEFAULT_COLUMN_SEPARATOR;
 	private String columnDelimiter = DEFAULT_COLUMN_DELIMITER;
 	private boolean stripControlCharacters = true;
+	private boolean escapeControlCharacters = false;
+	private String escapeCharacter = DEFAULT_ESCAPE_CHARACTER;
+	private boolean stripTrailingSpaces = false;
 
 	private boolean afterImage = false;
 
@@ -257,6 +261,9 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 			columnDelimiter = getProperty(prop, "columnDelimiter", DEFAULT_COLUMN_DELIMITER);
 			newLine = getProperty(prop, "newLine", DEFAULT_NEW_LINE);
 			stripControlCharacters = getPropertyBoolean(prop, "stripControlCharacters", true);
+			escapeControlCharacters = getPropertyBoolean(prop, "escapeControlCharacters", false);
+			escapeCharacter = getProperty(prop, "escapeCharacter", DEFAULT_NEW_LINE);
+			stripTrailingSpaces = getPropertyBoolean(prop, "stripTrailingSpaces", false);
 
 			// Set the default format for timestamps
 			outTimestampFormat = new SimpleDateFormat(timestampColumnFormat);
@@ -383,6 +390,10 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 							val = val.substring(0, clobTruncationPoint);
 						}
 
+						// Strip trailing spaces from the string
+						if (stripTrailingSpaces)
+							val = val.replaceAll("\\s+$", "");
+
 						// Strip control characters from the string
 						if (stripControlCharacters) {
 							if (!columnSeparator.isEmpty())
@@ -391,6 +402,17 @@ public class FlatFileDataFormat implements DataStageDataFormatIF {
 								val = val.replace(columnDelimiter, "");
 							if (!newLine.isEmpty())
 								val = val.replace(newLine, "");
+						} else {
+							// Escape control characters in the string
+							if (escapeControlCharacters) {
+								val = val.replace(escapeCharacter, escapeCharacter + escapeCharacter);
+								if (!columnSeparator.isEmpty())
+									val = val.replace(columnSeparator, escapeCharacter + columnSeparator);
+								if (!columnDelimiter.isEmpty())
+									val = val.replace(columnDelimiter, escapeCharacter + columnDelimiter);
+								if (!newLine.isEmpty())
+									val = val.replace(newLine, escapeCharacter + newLine);
+							}
 						}
 						addStringElement(outBuffer, columnName, val);
 					} else if (colObj instanceof BigDecimal) {

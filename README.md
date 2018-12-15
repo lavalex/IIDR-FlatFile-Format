@@ -22,6 +22,8 @@ An example of the Flat File formatting properties can be found below
 Assuming you have unzipped the file under the `<cdc_home>` directory, and the directory is called `IIDR-FlatFile-Format-master`, add the following entries to the end of the classpath specified in the `<cdc_home>/conf/system.cp`: <br/>
 `:IIDR-FlatFile-Format-master/lib/*:IIDR-FlatFile-Format-master`
 
+In case the CDC engine runs on Windows, use semicolons (;) instead of colons (:).
+
 Example classpath for CDC engine:
  ![Update Classpath](Documentation/images/Update_Classpath.png)
  
